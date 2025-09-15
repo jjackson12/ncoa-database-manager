@@ -2,8 +2,9 @@ import uuid
 from datetime import datetime
 import pandas as pd
 from google.cloud import bigquery
-from config import BIGQUERY_SERVICE_ACCOUNT_FILE
+from config import BIGQUERY_SERVICE_ACCOUNT_FILE, BUCKETS_SERVICE_ACCOUNT_KEY
 import logging
+from google.cloud import storage
 
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ def query_NCOA_data(input_data, test=False):
 
 # Initialize BigQuery bq_client
 bq_client = bigquery.Client.from_service_account_json(BIGQUERY_SERVICE_ACCOUNT_FILE)
-
+buckets_client = storage.Client.from_service_account_json(BUCKETS_SERVICE_ACCOUNT_KEY)
 # Generate a unique job_id and current datetime
 job_id = str(uuid.uuid4())
 job_run_datetime = datetime.utcnow()
@@ -71,19 +72,23 @@ data = [
 ]
 input_df = pd.DataFrame(data)
 
-# Save DataFrame to CSV
-# TODO: Save this to a google cloud bucket instead of locally
-csv_filename = f"job_request_input_id_{job_id}.csv"
-input_df.to_csv(csv_filename, index=False)
-print(f"Input data saved to {csv_filename}")
-
+# Save DataFrame to Google Cloud Storage bucket
+bucket_name = "ncoa_data"
+input_blob_name = f"ncoa_request_files/job_request_input_id_{job_id}.csv"
+bucket = buckets_client.bucket(bucket_name)
+input_blob = bucket.blob(input_blob_name)
+input_blob.upload_from_string(input_df.to_csv(index=False), content_type="text/csv")
+print(f"Input data saved to gs://{bucket_name}/{input_blob_name}")
 
 ncoa_response = query_NCOA_data(input_df, test=True)
 
-# TODO: Upload response to a google cloud bucket instead of locally
-ncoa_response_csv_filename = f"job_request_response_id_{job_id}.csv"
-ncoa_response.to_csv(ncoa_response_csv_filename, index=False)
-print(f"NCOA response data saved to {ncoa_response_csv_filename}")
+# Save NCOA response to Google Cloud Storage bucket
+response_blob_name = f"ncoa_response_files/job_request_response_id_{job_id}.csv"
+response_blob = bucket.blob(response_blob_name)
+response_blob.upload_from_string(
+    ncoa_response.to_csv(index=False), content_type="text/csv"
+)
+print(f"NCOA response data saved to gs://{bucket_name}/{response_blob_name}")
 
 # Update the BigQuery table with the response data
 table_id = "vr-mail-generator.vr_data.ncoa_address_statuses"
